@@ -1,0 +1,62 @@
+name: build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  win:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Show toolchain
+        shell: bash
+        run: |
+          go version
+          go env GOOS GOARCH CGO_ENABLED GOPATH
+
+      - name: Build
+        shell: bash
+        run: |
+          set -euo pipefail
+          export CGO_ENABLED=0
+          export GOOS=windows
+          export GOARCH=amd64
+          go build -trimpath \
+            -ldflags "-s -w -H windowsgui -X main.version=0.3.11-cloud -X main.windowsGUIBuild=1" \
+            -o warp-client.exe .
+          ls -l warp-client.exe
+
+      - name: Verify artifact
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $f = Get-Item warp-client.exe
+          "size: $($f.Length)"
+          $h = (Get-FileHash warp-client.exe -Algorithm SHA256).Hash.ToLower()
+          "sha256: $h"
+          # rsrc_windows_amd64.syso is committed in the repo; confirm it linked in.
+          $txt = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($f.FullName))
+          if ($txt.Contains('requestedExecutionLevel')) { "manifest: EMBEDDED" } else { "manifest: MISSING" }
+          if ($txt.Contains('Microsoft.Windows.Common-Controls')) { "comctl32-v6: EMBEDDED" } else { "comctl32-v6: MISSING" }
+          if ($txt.Contains('0.3.11-cloud')) { "version-string: FOUND" } else { "version-string: not-plaintext" }
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: warp-client-win64
+          path: warp-client.exe
+          if-no-files-found: error
+          retention-days: 7
